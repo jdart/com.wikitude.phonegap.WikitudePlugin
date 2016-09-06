@@ -1,6 +1,6 @@
-
+cordova.define("com.wikitude.phonegap.WikitudePlugin.WikitudePlugin", function(require, exports, module) {
 	/**
-	 * Release date: 12.01.16
+	 * Release date: 11.03.16
 	 */
 
 	var WikitudePlugin = function() {
@@ -9,7 +9,8 @@
 		 *  This is the SDK Key, provided to you after you purchased the Wikitude SDK from http =//www.wikitude.com/store/.
 		 *  You can obtain a free trial key at http =//www.wikitude.com/developer/licenses .
 		 */
-        this._sdkKey = "ENTER-YOUR-KEY-HER";
+		this._sdkKey = "0XVhJqXTGAyjt8jJMCDxNP66Su0lCCcK/9iMdtS9DutkdezuEPqmBJ1dGpDVu5/biXY6jrTBoObc/WlEnYQRshJOL7Z3d//3tnNCk4rUW3y5CWTFMTJLaxdNHByUdxIFrIvwROd228qHtMOxaqFmbhl+Mv0SSzaVGgw9ldFwOahTYWx0ZWRfX6DoF0hARVrJ+R5MF1gS70VS6ql7cWvus/c4YByjdZJ2BlTW0z2+Kpl1UIM9dgLdNayQNygBNSpGoZxbigpRPl+6nM44LrJzdXfrNpnRsOT0esKcDfponHPfK6vPiXh3R190J9xmcMCbFJXWkWmAUj5JsI+EcnaINmTUGAembek6tGzQnrIYWyieXKNRQNBRKuZbtPrNUgVUr3GV5YG0cZNimH4BYyt6dWGnF4009xEOFeczU1Nz/YsCvb2o9/ep7V4/wXGWXGqhaA2lpLDEMRJYGaU2ljMkBrXt320mg/I+c4Of+VBEy8pQ3Fk9+ID971shPwPYKDvQRCOVG4FAZSO8mBfQKkf/PGqWyIBj5PSvRmHGfJqvatI888D9gmp49VJ1fvekimrbPUGFf50YMhuAP2QxXls7Dbv7m6SENXEBznRMAuFM9QiXIGRw0xaC11B90jyarNG2CsaWFX8yIBBVPf9VRmQClHj8ON8mszGgAIo53nDp4pALjht4tHKoqs0o9rH1yjQCMixkPidvJEtCzy+P2ZArkuudvWwUstYGfHXf4uMluYQ6owf5K3AO+gnARVJkNQlv";
+
 
 		/**
 		 *  The Wikitude SDK can run in different modes.
@@ -33,7 +34,6 @@
         this.CameraFocusRangeNone = 0;
         this.CameraFocusRangeNear = 1;
         this.CameraFocusRangeFar  = 2;
-
 	};
 
 
@@ -79,11 +79,11 @@
 	WikitudePlugin.prototype.loadARchitectWorld = function(successCallback, errorCallback, architectWorldPath, requiredFeatures, startupConfiguration) {
 
 		cordova.exec(successCallback, errorCallback, "WikitudePlugin", "open", [{
-				"SDKKey": this._sdkKey,
-				"ARchitectWorldURL": architectWorldPath,
-				"RequiredFeatures": requiredFeatures,
-		    	"StartupConfiguration" : startupConfiguration
-			}]);
+			"SDKKey": this._sdkKey,
+			"ARchitectWorldURL": architectWorldPath,
+			"RequiredFeatures": requiredFeatures,
+		    "StartupConfiguration" : startupConfiguration
+		}]);
 
 		// We add an event listener on the resume and pause event of the application life-cycle
 		document.addEventListener("resume", this.onResume, false);
@@ -190,6 +190,22 @@
 		cordova.exec(calibrationHandler, this.onWikitudeError(), "WikitudePlugin", "setHeadingCalibrationHandler", []);
 	}
 
+	/**
+	 * Use this function to set a callback that is called every time the back button is pressed while the Wikitude Cordova Plugin is presented.
+	 *
+	 * @param {function()} onBackButtonCallback function which is called every time the Android back button is pressed.
+	 *
+	 * Note: The function is only implemented for Android!
+	 */
+	WikitudePlugin.prototype.setBackButtonCallback = function(onBackButtonCallback)
+	{
+	    if ( cordova.platformId == "android" ) {
+	        cordova.exec(onBackButtonCallback, this.onWikitudeError, "WikitudePlugin", "setBackButtonCallback", []);
+	    } else {
+	        alert('setBackButtonCallback is only available on Android and not on' + cordova.platformId);
+	    }
+	}
+
 	/*
 	 *	=============================================================================================================================
 	 *
@@ -217,7 +233,7 @@
 
 		// Call the Wikitude SDK that it should resume.
 		//cordova.exec(this.onWikitudeOK, this.onWikitudeError, "WikitudePlugin", "close", [""]);
-		//WikitudePlugin.prototype.close();
+		WikitudePlugin.prototype.close();
 	};
 
 	/**
@@ -243,4 +259,6 @@
 
 	/* Export a new WikitudePlugin instance */
 	var wikitudePlugin = new WikitudePlugin();
-	module.exports = wikitudePlugin;
+    module.exports = wikitudePlugin;
+
+});

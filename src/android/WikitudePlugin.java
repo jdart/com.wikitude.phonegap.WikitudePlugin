@@ -3,6 +3,7 @@ package com.wikitude.phonegap;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Date;
 
@@ -43,6 +44,7 @@ import com.wikitude.architect.ArchitectView.ArchitectUrlListener;
 import com.wikitude.architect.ArchitectView.CaptureScreenCallback;
 import com.wikitude.architect.StartupConfiguration;
 import com.wikitude.architect.StartupConfiguration.CameraPosition;
+import com.wikitude.architect.plugin.Plugin;
 import com.wikitude.phonegap.WikitudePlugin.ArchitectViewPhoneGap.OnKeyUpDownListener;
 
 
@@ -128,11 +130,14 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 	 */
 	private static final String	ACTION_CALL_JAVASCRIPT		= "callJavascript";
 
+    /**
+     * Used to set a custom callback that is called once the back button is clicked.
+     */
+    private static final String ACTION_SET_BACK_BUTTON_CALLBACK = "setBackButtonCallback";
+
 	private static final int CAMERA_PERMISSION_REQUEST_CODE = 1;
 
 	private static final int LOCATION_PERMISSION_REQUEST_CODE = 2;
-
-    private static final int WRITE_TO_EXTERNAL_STORAGE_REQUEST_CODE = 3;
 
 	/**
 	 * the Wikitude ARchitectview
@@ -150,9 +155,9 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 	private CallbackContext		openCallback				= null;
 
     /**
-     * callback-id for capture screen
+     * The custom back button callback id
      */
-    private CallbackContext captureScreenCallbackContext = null;
+    private CallbackContext		onBackButtonCallback		= null;
 
 	/**
 	 * last known location of the user, used internally for content-loading after user location was fetched
@@ -179,14 +184,11 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 	private JSONArray openArgs;
 	private String action;
 
-	private String screenCaptureName;
-    private Bitmap screenCapture;
-
 
 	@Override
 	public boolean execute( final String action, final JSONArray args, final CallbackContext callContext ) {
 		this.action = action;
-		
+
 		/* hide architect-view -> destroy and remove from activity */
 		if ( WikitudePlugin.ACTION_CLOSE.equals( action ) ) {
 			if ( this.architectView != null ) {
@@ -234,9 +236,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 		if (WikitudePlugin.ACTION_CAPTURE_SCREEN.equals(action) ) {
 			if (architectView!=null) {
 
-                WikitudePlugin.this.captureScreenCallbackContext = callContext;
-
-                int captureMode = ArchitectView.CaptureScreenCallback.CAPTURE_MODE_CAM_AND_WEBVIEW;
+				int captureMode = ArchitectView.CaptureScreenCallback.CAPTURE_MODE_CAM_AND_WEBVIEW;
 
 				try {
 					captureMode = ( args.getBoolean( 0 )) ? ArchitectView.CaptureScreenCallback.CAPTURE_MODE_CAM_AND_WEBVIEW : ArchitectView.CaptureScreenCallback.CAPTURE_MODE_CAM;
@@ -253,19 +253,64 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 					}
 				}
 
-				WikitudePlugin.this.screenCaptureName = name;
+				final String fileName = name;
 
 				architectView.captureScreen(captureMode, new CaptureScreenCallback() {
 
 					@Override
 					public void onScreenCaptured(Bitmap screenCapture) {
+						final File screenCaptureFile;
+						final String name = System.currentTimeMillis() + ".jpg";
+						try {
+							if (fileName.equals("")) {
+ 								final File imageDirectory = Environment.getExternalStorageDirectory();
+								if (imageDirectory == null) {
+									callContext.error("External storage not available");
+								}
+								screenCaptureFile = new File (imageDirectory, name);
+							} else {
+								File screenCapturePath = new File (fileName);
+								if (screenCapturePath.isDirectory()) {
+									screenCaptureFile = new File (screenCapturePath, name);
+								} else {
+									screenCaptureFile = screenCapturePath;
+								}
+							}
+							if (screenCaptureFile.exists()) {
+								screenCaptureFile.delete();
+							}
+							final FileOutputStream out = new FileOutputStream(screenCaptureFile);
+							screenCapture.compress(Bitmap.CompressFormat.JPEG, 90, out);
+							out.flush();
+							out.close();
 
-                        if ( !cordova.hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ) {
-                            WikitudePlugin.this.screenCapture = screenCapture;
-                            WikitudePlugin.this.cordova.requestPermission(WikitudePlugin.this, WRITE_TO_EXTERNAL_STORAGE_REQUEST_CODE, Manifest.permission.WRITE_EXTERNAL_STORAGE);
-                        } else {
-                            WikitudePlugin.this.saveScreenCapture(screenCapture);
-                        }
+							ContentValues values = new ContentValues();
+						    values.put(Images.Media.DATE_TAKEN, System.currentTimeMillis());
+						    values.put(Images.Media.MIME_TYPE, "image/jpeg");
+						    values.put(MediaStore.MediaColumns.DATA, screenCaptureFile.getAbsolutePath());
+
+						    Context context= cordova.getActivity().getApplicationContext();
+						    context.getContentResolver().insert(Images.Media.EXTERNAL_CONTENT_URI, values);
+
+							cordova.getActivity().runOnUiThread(new Runnable() {
+
+								@Override
+								public void run() {
+									final String absoluteCaptureImagePath = screenCaptureFile.getAbsolutePath();
+									callContext.success(absoluteCaptureImagePath);
+
+// 								in case you want to sent the pic to other applications, uncomment these lines (for future use)
+//								final Intent share = new Intent(Intent.ACTION_SEND);
+//								share.setType("image/jpg");
+//								share.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(screenCaptureFile));
+//								final String chooserTitle = "Share Snaphot";
+//								cordova.getActivity().startActivity(Intent.createChooser(share, chooserTitle));
+								}
+							});
+						} catch (Exception e) {
+							callContext.error(e.getMessage());
+						}
+
 					}
 				});
 				return true;
@@ -357,6 +402,15 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 			return true;
 		}
 
+        /* set a custom callback that is called when our plugin internally  */
+        if ( WikitudePlugin.ACTION_SET_BACK_BUTTON_CALLBACK.equals( action ) ) {
+            this.onBackButtonCallback = callContext;
+            final PluginResult result = new PluginResult( PluginResult.Status.NO_RESULT, action + ": registered back button callback");
+            result.setKeepCallback(true);
+            callContext.sendPluginResult( result );
+            return true;
+        }
+
 		/* define call-back for url-invocations */
 		if ( WikitudePlugin.ACTION_ON_URLINVOKE.equals( action ) ) {
 			this.urlInvokeCallback = callContext;
@@ -389,7 +443,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 					if ( this.cordova != null && this.cordova.getActivity() != null ) {
 						this.useCustomLocation = true;
 						cordova.getActivity().runOnUiThread(
-//						this.cordova.getThreadPool().execute( 
+//						this.cordova.getThreadPool().execute(
 								new Runnable() {
 
 							@Override
@@ -486,8 +540,31 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 		PluginResult result = null;
 		try {
 			final JSONObject params = this.openArgs.getJSONObject(0);
-			final String apiKey = params.getString( "SDKKey" );
-			final String filePath = params.getString( "ARchitectWorldURL" );
+			final String apiKey = params.getString("SDKKey");
+			String tempFilePath = params.getString("ARchitectWorldURL");
+
+
+			String stringResourceClassName = cordova.getActivity().getPackageName() + ".R$string";
+			Class<?> c = Class.forName(stringResourceClassName);
+			Field[] fields = c.getFields();
+
+			int stringPrefixIndex = -1;
+			for (Field field: fields) {
+				if (field.getName() == "WikitudeCordovaPluginLocalPathPrefix") {
+					stringPrefixIndex = field.getInt(null);
+				}
+			}
+
+			if ( stringPrefixIndex != -1 ) {
+				String stringPrefix = this.cordova.getActivity().getResources().getString(stringPrefixIndex);
+				if ( stringPrefix.length() > 0 ) {
+					int wwwIndex = tempFilePath.indexOf("www");
+					if ( wwwIndex > 0 ) {
+						tempFilePath= new StringBuffer(tempFilePath).insert(wwwIndex, stringPrefix+"/").toString();
+					}
+				}
+			}
+			final String filePath = tempFilePath;
 
 			int featuresTemp = 0;
 			try {
@@ -567,7 +644,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 	 */
 	private boolean removeArchitectView() {
 		if ( this.architectView != null ) {
-						
+
 			/* fake life-cycle calls, because activity is already up and running */
 			this.architectView.onPause();
 			this.architectView.onDestroy();
@@ -584,8 +661,9 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 			((ViewManager)this.architectView.getParent()).removeView( this.architectView );
 			this.architectView = null;
 
-			// To avoid JavaScript in Cordova staying paused after CordovaWebView lost focus call "handleResume" of the CordovaView in current Activity
-			this.webView.handleResume(true);
+            // To avoid JavaScript in Cordova staying paused after CordovaWebView lost focus call "handleResume" of the CordovaView in current Activity
+            this.webView.handleResume(true);
+
 			//WikitudePlugin.handleResumeInCordovaWebView(cordova.getActivity().getWindow().getDecorView().findViewById(android.R.id.content));
 			return true;
 		}
@@ -674,8 +752,9 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 	private void addArchitectView( final String apiKey, String filePath, int features, JSONObject startupConfiguration) throws IOException {
 		if ( this.architectView == null ) {
 
-			// To clear current webView's focus
-			this.webView.getView().clearFocus();
+            // To clear current webView's focus
+            this.webView.getView().clearFocus();
+
 			//WikitudePlugin.releaseFocusInCordovaWebView(cordova.getActivity().getWindow().getDecorView().findViewById(android.R.id.content));
 
 			this.architectView = new ArchitectViewPhoneGap( this.cordova.getActivity() , new OnKeyUpDownListener() {
@@ -683,11 +762,22 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 				@Override
 				public boolean onKeyUp(int keyCode, KeyEvent event) {
 					if (architectView!=null && keyCode == KeyEvent.KEYCODE_BACK) {
-						// For disabling native back button when architectView is existing
-						// if (WikitudePlugin.this.locationProvider != null) {
-						// 	WikitudePlugin.this.locationProvider.onPause();
-						// }
-						// removeArchitectView();
+                        // For disabling native back button when architectView is existing
+						//if (WikitudePlugin.this.locationProvider != null) {
+							//WikitudePlugin.this.locationProvider.onPause();
+						//}
+						//removeArchitectView();
+
+                        if ( WikitudePlugin.this.onBackButtonCallback != null ) {
+                            try {
+                                /* pass called url as String to callback-method */
+                                final PluginResult res = new PluginResult( PluginResult.Status.OK);
+                                res.setKeepCallback(true);
+                                WikitudePlugin.this.onBackButtonCallback.sendPluginResult( res );
+                            } catch ( Exception e ) {
+                                WikitudePlugin.this.onBackButtonCallback.error( "onBackButton result could not be send." );
+                            }
+                        }
 						return true;
 
 					} else {
@@ -701,7 +791,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 				}
 			});
 
-			this.architectView.setFocusableInTouchMode(true);
+			//this.architectView.setFocusableInTouchMode(true);
 			this.architectView.requestFocus();
 
 			this.locationListener = new LocationListener() {
@@ -736,20 +826,20 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 			/* add content view and fake initial life-cycle */
 			(this.cordova.getActivity()).addContentView( this.architectView, new ViewGroup.LayoutParams( LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT ) );
 			(this.cordova.getActivity()).setVolumeControlStream( AudioManager.STREAM_MUSIC );
-	
+
 			/* fake life-cycle calls, because activity is already up and running */
 			this.architectView.onCreate( getStartupConfiguration( apiKey, features, startupConfiguration ) );
 			this.architectView.onPostCreate();
-	
+
 			/* register self as url listener to fwd these native calls to PhoneGap */
 			this.architectView.registerUrlListener( WikitudePlugin.this );
-	
+
 			/* load asset from local directory if prefix is used */
 			if ( filePath.startsWith( WikitudePlugin.LOCAL_ASSETS_PATH_ROOT ) ) {
 				filePath = filePath.substring( WikitudePlugin.LOCAL_ASSETS_PATH_ROOT.length() );
 			}
 			this.architectView.load( filePath );
-	
+
 			/* also a fake-life-cycle call (the last one before it is really shown in UI */
 			this.architectView.onResume();
 
@@ -763,7 +853,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 		InputMethodManager inputManager = (InputMethodManager)
 				(this.cordova.getActivity()).getSystemService(Context.INPUT_METHOD_SERVICE);
 				    inputManager.hideSoftInputFromWindow((this.cordova.getActivity()).getCurrentFocus().getWindowToken(),
-							InputMethodManager.HIDE_NOT_ALWAYS);
+				    InputMethodManager.HIDE_NOT_ALWAYS);
 	}
 
 
@@ -789,65 +879,10 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 		else if (rootView instanceof ViewGroup) {
 			final int childCount = ((ViewGroup)rootView).getChildCount();
 			for (int i=0; i< childCount; i++) {
-				WikitudePlugin.handleResumeInCordovaWebView(((ViewGroup) rootView).getChildAt(i));
+				WikitudePlugin.handleResumeInCordovaWebView(((ViewGroup)rootView).getChildAt(i));
 			}
 		}
 	}
-
-    private void saveScreenCapture(Bitmap screenCapture) {
-
-        final File screenCaptureFile;
-        final String name = System.currentTimeMillis() + ".jpg";
-        try {
-            if (WikitudePlugin.this.screenCaptureName .equals("")) {
-                final File imageDirectory = Environment.getExternalStorageDirectory();
-                if (imageDirectory == null) {
-					WikitudePlugin.this.captureScreenCallbackContext.error("External storage not available");
-                }
-                screenCaptureFile = new File (imageDirectory, name);
-            } else {
-                File screenCapturePath = new File (WikitudePlugin.this.screenCaptureName);
-                if (screenCapturePath.isDirectory()) {
-                    screenCaptureFile = new File (screenCapturePath, name);
-                } else {
-                    screenCaptureFile = screenCapturePath;
-                }
-            }
-            if (screenCaptureFile.exists()) {
-                screenCaptureFile.delete();
-            }
-            final FileOutputStream out = new FileOutputStream(screenCaptureFile);
-            screenCapture.compress(Bitmap.CompressFormat.JPEG, 90, out);
-            out.flush();
-            out.close();
-
-            ContentValues values = new ContentValues();
-            values.put(Images.Media.DATE_TAKEN, System.currentTimeMillis());
-            values.put(Images.Media.MIME_TYPE, "image/jpeg");
-            values.put(MediaStore.MediaColumns.DATA, screenCaptureFile.getAbsolutePath());
-
-            Context context= cordova.getActivity().getApplicationContext();
-            context.getContentResolver().insert(Images.Media.EXTERNAL_CONTENT_URI, values);
-
-            cordova.getActivity().runOnUiThread(new Runnable() {
-
-                @Override
-                public void run() {
-                    final String absoluteCaptureImagePath = screenCaptureFile.getAbsolutePath();
-                    WikitudePlugin.this.captureScreenCallbackContext.success(absoluteCaptureImagePath);
-
-//                        in case you want to sent the pic to other applications, uncomment these lines (for future use)
-//                        final Intent share = new Intent(Intent.ACTION_SEND);
-//                        share.setType("image/jpg");
-//                        share.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(screenCaptureFile));
-//                        final String chooserTitle = "Share Snaphot";
-//                        cordova.getActivity().startActivity(Intent.createChooser(share, chooserTitle));
-                }
-            });
-        } catch (Exception e) {
-            WikitudePlugin.this.captureScreenCallbackContext.error(e.getMessage());
-        }
-    }
 
 
 	protected static class ArchitectViewPhoneGap extends ArchitectView {
@@ -978,7 +1013,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 			}
 		}
 	}
-	
+
 	private interface ILocationProvider {
 
 		/**
@@ -1022,13 +1057,7 @@ public class WikitudePlugin extends CordovaPlugin implements ArchitectUrlListene
 				} else {
 					this.openCallback.error("Location permission wasn't granted");
 				}
-            } else if ( permission.equals(Manifest.permission.WRITE_EXTERNAL_STORAGE) ) {
-                if (grantResults.length > 0 && grantResults[i] == PackageManager.PERMISSION_GRANTED) {
-                    WikitudePlugin.this.saveScreenCapture(WikitudePlugin.this.screenCapture);
-                } else {
-                    WikitudePlugin.this.captureScreenCallbackContext.error("External storage permission wasn't granted");
-                }
-            }
+			}
 		}
 	}
 }
